@@ -522,7 +522,11 @@ class GenerationMixin:
         model_input_name = model_input_name if model_input_name is not None else self.main_input_name
         encoder_kwargs["return_dict"] = True
         encoder_kwargs[model_input_name] = inputs_tensor
-        model_kwargs["encoder_outputs"]: ModelOutput = encoder(**encoder_kwargs)
+        encoder_outputs = encoder(**encoder_kwargs)
+        if "attention_mask" in encoder_outputs:
+            # Delegate all input processing to encoder, in case there's something special about the input format
+            model_kwargs["attention_mask"] = encoder_outputs.attention_mask
+        model_kwargs["encoder_outputs"]: ModelOutput = encoder_outputs
 
         return model_kwargs
 
@@ -1160,7 +1164,8 @@ class GenerationMixin:
         # otherwise model_input_name is None
         # all model-specific keyword inputs are removed from `model_kwargs`
         inputs_tensor, model_input_name, model_kwargs = self._prepare_model_inputs(inputs, bos_token_id, model_kwargs)
-        batch_size = inputs_tensor.shape[0]
+        if not self.config.is_encoder_decoder:
+            batch_size = inputs_tensor.shape[0]
 
         # 3. Define other model kwargs
         model_kwargs["output_attentions"] = output_attentions
@@ -1175,12 +1180,15 @@ class GenerationMixin:
                 inputs_tensor, pad_token_id, eos_token_id
             )
 
-        if self.config.is_encoder_decoder and "encoder_outputs" not in model_kwargs:
-            # if model is encoder decoder encoder_outputs are created
-            # and added to `model_kwargs`
-            model_kwargs = self._prepare_encoder_decoder_kwargs_for_generation(
-                inputs_tensor, model_kwargs, model_input_name
-            )
+        if self.config.is_encoder_decoder:
+            if "encoder_outputs" not in model_kwargs:
+                # if model is encoder decoder encoder_outputs are created
+                # and added to `model_kwargs`
+                model_kwargs = self._prepare_encoder_decoder_kwargs_for_generation(
+                    inputs_tensor, model_kwargs, model_input_name
+                )
+            # Again follows the principle of getting metadata from the output of the encoder, not the input
+            batch_size = model_kwargs['encoder_outputs'].last_hidden_state.shape[0]
 
         # 4. Prepare `input_ids` which will be used for auto-regressive generation
         if self.config.is_encoder_decoder:
@@ -1189,7 +1197,7 @@ class GenerationMixin:
                 decoder_start_token_id=decoder_start_token_id,
                 bos_token_id=bos_token_id,
                 model_kwargs=model_kwargs,
-                device=inputs_tensor.device,
+                device=self.device,
             )
         else:
             # if decoder-only then inputs_tensor has to be `input_ids`
@@ -1341,7 +1349,7 @@ class GenerationMixin:
             beam_scorer = BeamSearchScorer(
                 batch_size=batch_size,
                 num_beams=num_beams,
-                device=inputs_tensor.device,
+                device=self.device,
                 length_penalty=length_penalty,
                 do_early_stopping=early_stopping,
                 num_beam_hyps_to_keep=num_return_sequences,
@@ -1381,7 +1389,7 @@ class GenerationMixin:
             beam_scorer = BeamSearchScorer(
                 batch_size=batch_size * num_return_sequences,
                 num_beams=num_beams,
-                device=inputs_tensor.device,
+                device=self.device,
                 length_penalty=length_penalty,
                 do_early_stopping=early_stopping,
             )
@@ -1424,7 +1432,7 @@ class GenerationMixin:
                 batch_size=batch_size,
                 num_beams=num_beams,
                 max_length=stopping_criteria.max_length,
-                device=inputs_tensor.device,
+                device=self.device,
                 length_penalty=length_penalty,
                 do_early_stopping=early_stopping,
                 num_beam_hyps_to_keep=num_return_sequences,
@@ -1506,7 +1514,7 @@ class GenerationMixin:
                 constraints=final_constraints,
                 batch_size=batch_size,
                 num_beams=num_beams,
-                device=inputs_tensor.device,
+                device=self.device,
                 length_penalty=length_penalty,
                 do_early_stopping=early_stopping,
                 num_beam_hyps_to_keep=num_return_sequences,
