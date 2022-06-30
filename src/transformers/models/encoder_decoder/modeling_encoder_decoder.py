@@ -499,12 +499,11 @@ class EncoderDecoderModel(PreTrainedModel):
                 return_dict=return_dict,
                 **kwargs_encoder,
             )
+            if 'attention_mask' in encoder_outputs:
+                # Delegate all input processing to encoder, in case there's something special about the input format
+                attention_mask = encoder_outputs.attention_mask
         elif isinstance(encoder_outputs, tuple):
             encoder_outputs = BaseModelOutput(*encoder_outputs)
-
-        if 'attention_mask' in encoder_outputs:
-            # Delegate all input processing to encoder, in case there's something special about the input format
-            attention_mask = encoder_outputs.attention_mask
 
         encoder_hidden_states = encoder_outputs[0]
 
