@@ -266,6 +266,10 @@ class EncoderDecoderModel(PreTrainedModel):
     def set_output_embeddings(self, new_embeddings):
         return self.decoder.set_output_embeddings(new_embeddings)
 
+    def estimate_tokens(self, input_dict):
+        # Delegate all input processing to encoder, in case there's something special about the input format
+        return self.encoder.estimate_tokens(input_dict)
+
     @classmethod
     def from_pretrained(cls, *args, **kwargs):
         # At the moment fast initialization is not supported for composite models
@@ -497,6 +501,10 @@ class EncoderDecoderModel(PreTrainedModel):
             )
         elif isinstance(encoder_outputs, tuple):
             encoder_outputs = BaseModelOutput(*encoder_outputs)
+
+        if 'attention_mask' in encoder_outputs:
+            # Delegate all input processing to encoder, in case there's something special about the input format
+            attention_mask = encoder_outputs.attention_mask
 
         encoder_hidden_states = encoder_outputs[0]
 
